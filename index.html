@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>2D MAFIA</title>
+
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial}
+body{background:#000;color:#fff;overflow:hidden}
+
+/* ---------- SCREEN SYSTEM ---------- */
+.screen{position:absolute;inset:0;display:none}
+.screen.active{display:flex}
+
+/* ---------- MENU ---------- */
+#menu{
+  background:url('assets/menu/menu_bg.jpg') center/cover no-repeat;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+}
+.menu-box{
+  background:rgba(0,0,0,.7);
+  padding:20px;
+  border-radius:16px;
+  width:90%;
+  max-width:420px;
+}
+.menu-box h1{text-align:center}
+.menu-box p{text-align:center;font-size:14px;margin:6px 0}
+.menu-btn{
+  width:100%;
+  padding:14px;
+  margin-top:10px;
+  font-size:18px;
+  border-radius:12px;
+  border:none;
+  background:#e91e63;
+  color:#fff;
+}
+
+/* ---------- GAME ---------- */
+#game{background:#111}
+#road{
+  position:absolute;
+  left:30%;
+  width:40%;
+  height:100%;
+  background:url('assets/road/road_city.png') center/cover no-repeat;
+}
+
+/* CITY OBJECTS */
+.city{
+  position:absolute;
+  width:80px;
+  height:120px;
+  background-size:contain;
+  background-repeat:no-repeat;
+}
+
+/* ENTITIES */
+.car{
+  position:absolute;
+  width:50px;
+  height:90px;
+  background-size:contain;
+  background-repeat:no-repeat;
+}
+.human{
+  position:absolute;
+  width:40px;
+  height:40px;
+  background:url('assets/humans/npc_human.png') center/contain no-repeat;
+}
+
+#player{bottom:60px}
+
+/* HUD */
+#hud{
+  position:absolute;
+  top:10px;
+  left:10px;
+  right:10px;
+  display:flex;
+  justify-content:space-between;
+  font-size:14px;
+}
+#wanted{color:gold}
+
+/* CONTROLS (LANDSCAPE + 3D STYLE) */
+#controls{
+  position:absolute;
+  bottom:0;
+  left:0;
+  right:0;
+  padding:10px;
+  display:flex;
+  justify-content:space-around;
+  background:linear-gradient(#222,#000);
+}
+.ctrl{
+  width:80px;
+  height:80px;
+  border-radius:50%;
+  background:radial-gradient(circle,#555,#111);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:26px;
+  box-shadow:0 6px 0 #000;
+}
+#nitro{
+  background:radial-gradient(circle,#ffd700,#b8860b);
+  color:#000;
+}
+
+/* PAUSE */
+#pause{
+  position:absolute;
+  top:60px;
+  right:10px;
+  width:50px;
+  height:50px;
+  background:#333;
+  border-radius:10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+/* OVERLAY */
+.overlay{
+  position:absolute;
+  inset:0;
+  background:rgba(0,0,0,.8);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  flex-direction:column;
+}
+.overlay.active{display:flex}
+</style>
+</head>
+
+<body>
+
+<!-- AUDIO -->
+<audio id="menuMusic" src="assets/sounds/menu_music.mp3" loop></audio>
+<audio id="engineSound" src="assets/sounds/engine.mp3" loop></audio>
+<audio id="nitroSound" src="assets/sounds/nitro.mp3"></audio>
+<audio id="crashSound" src="assets/sounds/crash.mp3"></audio>
+
+<!-- MENU -->
+<div id="menu" class="screen active">
+  <div class="menu-box">
+    <h1>2D MAFIA</h1>
+    <p>Coins: <span id="mCoins">0</span></p>
+    <p>Best Score: <span id="best">0</span></p>
+    <p>Last Mission: <span id="lastMission">None</span></p>
+    <button class="menu-btn" onclick="startGame()">START</button>
+    <button class="menu-btn" onclick="loadGame()">LOAD</button>
+  </div>
+</div>
+
+<!-- GAME -->
+<div id="game" class="screen">
+  <div id="road"></div>
+  <div id="player" class="car"></div>
+
+  <div id="hud">
+    <div>HP: <span id="hp">100</span></div>
+    <div id="wanted">☆☆☆☆☆</div>
+    <div>Coins: <span id="coins">0</span></div>
+  </div>
+
+  <div id="pause" onclick="togglePause()">⏸</div>
+
+  <div id="controls">
+    <div class="ctrl" ontouchstart="move(-40)">◀</div>
+    <div class="ctrl" id="nitro" ontouchstart="useNitro()">N</div>
+    <div class="ctrl" ontouchstart="move(40)">▶</div>
+  </div>
+
+  <div id="pauseMenu" class="overlay">
+    <h2>Paused</h2>
+    <button class="menu-btn" onclick="togglePause()">Resume</button>
+    <button class="menu-btn" onclick="saveAndExit()">Menu</button>
+  </div>
+</div>
+
+<script>
+/* SAVE DATA */
+let save=JSON.parse(localStorage.getItem("mafiaSave")||"{}");
+let coins=save.coins||0;
+let best=save.best||0;
+let lastMission=save.mission||"None";
+
+/* MENU INIT */
+menuMusic.play();
+mCoins.textContent=coins;
+best.textContent=best;
+lastMission.textContent=lastMission;
+
+/* GAME STATE */
+let x=window.innerWidth/2;
+let hp=100,score=0;
+let wanted=0;
+let run=false,paused=false;
+let npcs=[],police=[],humans=[];
+
+const player=document.getElementById("player");
+
+/* START */
+function startGame(){
+  menuMusic.pause();
+  engineSound.play();
+  show("game");
+  run=true;
+  hp=100;score=0;wanted=0;
+  player.style.backgroundImage="url('assets/cars/player_red.png')";
+  spawnCity();
+  spawnLoops();
+  setMission();
+  loop();
+}
+
+/* LOAD */
+function loadGame(){
+  startGame();
+}
+
+/* CITY */
+function spawnCity(){
+  for(let i=0;i<12;i++){
+    let c=document.createElement("div");
+    c.className="city";
+    c.style.backgroundImage=`url('assets/city/${["building","house","shop"][i%3]}.png')`;
+    c.style.left=(i%2?5:85)+"%";
+    c.style.top=i*180+"px";
+    game.appendChild(c);
+  }
+}
+
+/* MISSIONS */
+function setMission(){
+  lastMission=["Drive 500m","Escape Police","No Civilian Hit"][Math.floor(Math.random()*3)];
+}
+
+/* CONTROLS */
+function move(v){x+=v}
+function useNitro(){nitroSound.play()}
+
+/* SPAWNS */
+function spawnLoops(){
+  setInterval(spawnNPC,1500);
+  setInterval(spawnHuman,2200);
+  setInterval(spawnPolice,6000);
+}
+
+function spawnNPC(){
+  let c=document.createElement("div");
+  c.className="car";
+  c.style.backgroundImage="url('assets/cars/npc_car.png')";
+  c.style.left=30+Math.random()*40+"%";
+  c.style.top="-100px";
+  game.appendChild(c);
+  npcs.push(c);
+}
+
+function spawnHuman(){
+  let h=document.createElement("div");
+  h.className="human";
+  h.style.left=Math.random()<.5?"10%":"85%";
+  h.style.top=window.innerHeight+"px";
+  game.appendChild(h);
+  humans.push(h);
+}
+
+function spawnPolice(){
+  if(wanted<1)return;
+  let p=document.createElement("div");
+  p.className="car";
+  p.style.backgroundImage="url('assets/cars/police.png')";
+  p.style.top="-150px";
+  p.style.left="50%";
+  game.appendChild(p);
+  police.push(p);
+}
+
+/* COLLISION */
+function hit(a,b){
+  let r1=a.getBoundingClientRect();
+  let r2=b.getBoundingClientRect();
+  return !(r1.bottom<r2.top||r1.top>r2.bottom||r1.right<r2.left||r1.left>r2.right);
+}
+
+/* LOOP */
+function loop(){
+  if(!run)return;
+  if(!paused){
+    player.style.left=x+"px";
+    score++;
+    if(score%120==0)coins++;
+
+    npcs.forEach((c,i)=>{
+      c.style.top=c.offsetTop+4+"px";
+      if(hit(player,c)){damage(10);wantedUp();c.remove();npcs.splice(i,1)}
+    });
+
+    humans.forEach((h,i)=>{
+      h.style.top=h.offsetTop-2+"px";
+      if(hit(player,h)){damage(15);wantedUp();h.remove();humans.splice(i,1)}
+    });
+
+    police.forEach((p,i)=>{
+      p.style.top=p.offsetTop+(6+wanted)+"px";
+      p.style.left=p.offsetLeft+(x-p.offsetLeft)*0.05+"px";
+      if(hit(player,p))damage(20);
+    });
+
+    updateHUD();
+  }
+  requestAnimationFrame(loop);
+}
+
+/* DAMAGE */
+function damage(d){
+  crashSound.play();
+  hp-=d;
+  if(hp<=0)gameOver();
+}
+
+/* WANTED */
+function wantedUp(){
+  if(wanted<5)wanted++;
+}
+
+/* HUD */
+function updateHUD(){
+  hp.textContent=hp;
+  coins.textContent=coins;
+  document.getElementById("wanted").textContent="★★★★★☆☆☆☆☆".slice(5-wanted,10-wanted);
+}
+
+/* PAUSE */
+function togglePause(){
+  paused=!paused;
+  pauseMenu.classList.toggle("active");
+  paused?engineSound.pause():engineSound.play();
+}
+
+/* GAME OVER */
+function gameOver(){
+  run=false;
+  engineSound.pause();
+  saveAndExit();
+}
+
+/* SAVE */
+function saveAndExit(){
+  localStorage.setItem("mafiaSave",JSON.stringify({
+    coins,
+    best:Math.max(best,score),
+    mission:lastMission
+  }));
+  location.reload();
+}
+
+/* SCREEN */
+function show(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+</script>
+
+</body>
+</html>
